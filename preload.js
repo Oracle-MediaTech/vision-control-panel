@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Deploy
   deployStart: () => ipcRenderer.send('deploy:start'),
+  deployContinue: (fromStep) => ipcRenderer.send('deploy:continue', fromStep),
   deployCancel: () => ipcRenderer.send('deploy:cancel'),
   onDeployProgress: (callback) => {
     ipcRenderer.removeAllListeners('deploy:progress');

@@ -101,11 +101,15 @@ export function useDeploy() {
   const [deploying, setDeploying] = useState(false);
   const [steps, setSteps] = useState<Record<number, string>>({});
   const [logs, setLogs] = useState<string[]>([]);
+  const [failedStep, setFailedStep] = useState<number | null>(null);
   const deployingRef = useRef(false);
 
   useEffect(() => {
     api.onDeployProgress((data: DeployProgress) => {
       setSteps(prev => ({ ...prev, [data.step]: data.status }));
+      if (data.status === 'error') {
+        setFailedStep(data.step);
+      }
     });
 
     api.onDeployLog((line: string) => {
@@ -120,6 +124,7 @@ export function useDeploy() {
       setDeploying(false);
       if (data.success) {
         setLogs(prev => [...prev, 'Deploy completed successfully!']);
+        setFailedStep(null);
       } else {
         setLogs(prev => [...prev, `Deploy failed: ${data.error || 'Unknown error'}`]);
       }
@@ -132,8 +137,23 @@ export function useDeploy() {
     setDeploying(true);
     setSteps({});
     setLogs([]);
+    setFailedStep(null);
     api.deployStart();
   }, []);
+
+  const continueFromFailed = useCallback(() => {
+    if (deployingRef.current || failedStep === null) return;
+    deployingRef.current = true;
+    setDeploying(true);
+    setSteps(prev => {
+      const next = { ...prev };
+      delete next[failedStep];
+      return next;
+    });
+    setLogs([]);
+    setFailedStep(null);
+    api.deployContinue(failedStep);
+  }, [failedStep]);
 
   const cancel = useCallback(() => {
     api.deployCancel();
@@ -141,5 +161,5 @@ export function useDeploy() {
 
   const clearLogs = useCallback(() => setLogs([]), []);
 
-  return { deploying, steps, logs, start, cancel, clearLogs };
+  return { deploying, steps, logs, start, continueFromFailed, failedStep, cancel, clearLogs };
 }

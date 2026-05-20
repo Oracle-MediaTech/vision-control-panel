@@ -144,6 +144,11 @@ electron_1.ipcMain.on('deploy:start', () => {
         deployManager.deploy(mainWindow.webContents);
     }
 });
+electron_1.ipcMain.on('deploy:continue', (_event, fromStep) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        deployManager.deploy(mainWindow.webContents, fromStep);
+    }
+});
 electron_1.ipcMain.on('deploy:cancel', () => {
     deployManager.cancel();
 });

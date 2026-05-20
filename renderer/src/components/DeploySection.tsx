@@ -1,4 +1,4 @@
-import { Rocket, X, Circle, CheckCircle, XCircle, Loader } from 'lucide-react';
+import { Rocket, X, Circle, CheckCircle, XCircle, Loader, RotateCcw } from 'lucide-react';
 import { Card, CardTitle } from './Card';
 import { cn } from '../lib/utils';
 
@@ -7,15 +7,17 @@ const DEPLOY_STEPS = [
   'Build Backend',
   'Build Admin Panel',
   'Build Terminal PWA',
-  'Copy Admin to Server',
+  'Prepare Admin Standalone',
   'Copy Terminal to Server',
-  'Restart Server',
+  'Restart Services',
 ];
 
 interface DeploySectionProps {
   deploying: boolean;
   steps: Record<number, string>;
+  failedStep: number | null;
   onStart: () => void;
+  onContinue: () => void;
   onCancel: () => void;
 }
 
@@ -26,7 +28,7 @@ function StepIcon({ status }: { status?: string }) {
   return <Circle size={16} className="text-muted-foreground" />;
 }
 
-export function DeploySection({ deploying, steps, onStart, onCancel }: DeploySectionProps) {
+export function DeploySection({ deploying, steps, failedStep, onStart, onContinue, onCancel }: DeploySectionProps) {
   const hasSteps = Object.keys(steps).length > 0;
 
   return (
@@ -35,20 +37,30 @@ export function DeploySection({ deploying, steps, onStart, onCancel }: DeploySec
       <p className="text-[13px] text-muted mb-3.5">Build all projects, copy to server, and restart.</p>
 
       <div className="flex gap-2.5">
-        {!deploying ? (
-          <button
-            onClick={onStart}
-            className="px-7 py-3 text-sm font-semibold bg-primary hover:bg-blue-700 text-white border-none rounded-lg cursor-pointer transition-all inline-flex items-center gap-1.5"
-          >
-            <Rocket size={16} /> Deploy All
-          </button>
-        ) : (
+        {deploying ? (
           <button
             onClick={onCancel}
             className="px-5 py-2.5 text-[13px] font-semibold bg-danger hover:bg-red-700 text-white border-none rounded-lg cursor-pointer transition-all inline-flex items-center gap-1.5"
           >
             <X size={14} /> Cancel Deploy
           </button>
+        ) : (
+          <>
+            <button
+              onClick={onStart}
+              className="px-7 py-3 text-sm font-semibold bg-primary hover:bg-blue-700 text-white border-none rounded-lg cursor-pointer transition-all inline-flex items-center gap-1.5"
+            >
+              <Rocket size={16} /> Deploy All
+            </button>
+            {failedStep !== null && (
+              <button
+                onClick={onContinue}
+                className="px-5 py-3 text-sm font-semibold bg-warning hover:bg-amber-700 text-white border-none rounded-lg cursor-pointer transition-all inline-flex items-center gap-1.5"
+              >
+                <RotateCcw size={16} /> Continue from Step {failedStep + 1}
+              </button>
+            )}
+          </>
         )}
       </div>
 

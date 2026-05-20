@@ -46,12 +46,12 @@ export async function start(): Promise<void> {
 }
 
 export async function stop(): Promise<void> {
-  await runPm2(['stop', 'vfc-backend']);
+  await runPm2(['stop', 'all']);
 }
 
 export async function restart(): Promise<void> {
   try {
-    await runPm2(['restart', 'vfc-backend']);
+    await runPm2(['restart', 'all']);
   } catch {
     await start();
   }

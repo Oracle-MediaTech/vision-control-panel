@@ -8,7 +8,11 @@
     "build:main": "tsc",
     "build:renderer": "vite build",
     "start": "npm run build && electron .",
-    "dev": "npm run build && electron ."
+    "dev": "npm run build && concurrently -k \"tsc --watch\" \"vite build --watch\" \"electronmon .\""
+  },
+  "electronmon": {
+    "patterns": ["dist/**/*"],
+    "logLevel": "quiet"
   },
   "keywords": [],
   "author": "",
@@ -28,6 +32,8 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "electronmon": "^2.0.4",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.12"

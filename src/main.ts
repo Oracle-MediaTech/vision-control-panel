@@ -107,6 +107,12 @@ ipcMain.on('deploy:start', () => {
   }
 });
 
+ipcMain.on('deploy:continue', (_event: IpcMainEvent, fromStep: number) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    deployManager.deploy(mainWindow.webContents, fromStep);
+  }
+});
+
 ipcMain.on('deploy:cancel', () => {
   deployManager.cancel();
 });

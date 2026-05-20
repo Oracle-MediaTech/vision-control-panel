@@ -25,13 +25,6 @@ export default function App() {
     deploy.start();
   };
 
-  const handleClearLogs = () => {
-    logs.clear();
-    deploy.clearLogs();
-  };
-
-  const allLogs = deploy.deploying || deploy.logs.length > 0 ? deploy.logs : logs.lines;
-
   return (
     <div className="min-h-screen">
       <Header status={status} />
@@ -41,14 +34,19 @@ export default function App() {
         <DeploySection
           deploying={deploy.deploying}
           steps={deploy.steps}
+          failedStep={deploy.failedStep}
           onStart={handleStartDeploy}
+          onContinue={deploy.continueFromFailed}
           onCancel={deploy.cancel}
         />
         <LogViewer
-          active={logs.active || deploy.deploying || deploy.logs.length > 0}
-          lines={allLogs}
-          onToggle={deploy.deploying ? () => {} : logs.toggle}
-          onClear={handleClearLogs}
+          serverActive={logs.active}
+          serverLogs={logs.lines}
+          deployLogs={deploy.logs}
+          deploying={deploy.deploying}
+          onToggleServer={logs.toggle}
+          onClearServer={logs.clear}
+          onClearDeploy={deploy.clearLogs}
         />
       </main>
     </div>

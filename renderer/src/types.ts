@@ -36,6 +36,7 @@ export interface ElectronAPI {
   pm2StopLogs: () => void;
   onPm2Log: (callback: (line: string) => void) => void;
   deployStart: () => void;
+  deployContinue: (fromStep: number) => void;
   deployCancel: () => void;
   onDeployProgress: (callback: (data: DeployProgress) => void) => void;
   onDeployLog: (callback: (line: string) => void) => void;

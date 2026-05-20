@@ -49,11 +49,11 @@ async function start() {
     await runPm2(['start', ECOSYSTEM_PATH]);
 }
 async function stop() {
-    await runPm2(['stop', 'vfc-backend']);
+    await runPm2(['stop', 'all']);
 }
 async function restart() {
     try {
-        await runPm2(['restart', 'vfc-backend']);
+        await runPm2(['restart', 'all']);
     }
     catch {
         await start();
