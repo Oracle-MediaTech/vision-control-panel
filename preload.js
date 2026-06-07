@@ -16,8 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Deploy
-  deployStart: () => ipcRenderer.send('deploy:start'),
-  deployContinue: (fromStep) => ipcRenderer.send('deploy:continue', fromStep),
+  deployStart: (target) => ipcRenderer.send('deploy:start', target),
+  deployContinue: (fromStep, target) => ipcRenderer.send('deploy:continue', fromStep, target),
   deployCancel: () => ipcRenderer.send('deploy:cancel'),
   onDeployProgress: (callback) => {
     ipcRenderer.removeAllListeners('deploy:progress');
@@ -34,6 +34,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // LAN info
   getLanInfo: () => ipcRenderer.invoke('lan:get-info'),
+
+  // Settings (env file in userData)
+  settingsGetEnv: () => ipcRenderer.invoke('settings:get-env'),
+  settingsSaveEnv: (content) => ipcRenderer.invoke('settings:save-env', content),
+
+  // Database dump
+  dbDump: () => ipcRenderer.invoke('db:dump'),
+  onDbDumpLog: (callback) => {
+    ipcRenderer.removeAllListeners('db:dump-log');
+    ipcRenderer.on('db:dump-log', (_event, data) => callback(data));
+  },
 
   // Cleanup
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

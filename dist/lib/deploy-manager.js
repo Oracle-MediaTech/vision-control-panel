@@ -43,7 +43,10 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const lan_detector_1 = require("./lan-detector");
 const pm2Manager = __importStar(require("./pm2-manager"));
-const BACKEND_DIR = path_1.default.resolve(__dirname, '../../../vfc-backend');
+const isPackaged = fs_1.default.existsSync(path_1.default.join(process.resourcesPath || '', 'backend'));
+const BACKEND_DIR = isPackaged
+    ? path_1.default.join(process.resourcesPath, 'backend')
+    : path_1.default.resolve(__dirname, '../../../vfc-backend');
 const FRONTEND_DIR = path_1.default.resolve(__dirname, '../../../vfc-frontend');
 const PWA_DIR = path_1.default.resolve(__dirname, '../../../vision-attendance-pwa');
 let activeChildren = [];
@@ -79,9 +82,10 @@ function runCommand(cmd, args, cwd, onLog) {
         });
     });
 }
-function patchFrontendConfig(lanIP) {
-    const frontendEnvPath = path_1.default.join(FRONTEND_DIR, '.env');
-    fs_1.default.writeFileSync(frontendEnvPath, `NEXT_PUBLIC_API_URL=http://${lanIP}:3030/api/v1\n`, 'utf-8');
+// API base URL is now resolved at runtime from window.location.hostname in
+// each frontend's apiClient, so we no longer write .env files here. This
+// patch only fixes up app-specific config files that the frontends expect.
+function patchFrontendConfig(_lanIP) {
     const apiClientPath = path_1.default.join(FRONTEND_DIR, 'lib', 'apiClient.ts');
     if (fs_1.default.existsSync(apiClientPath)) {
         let content = fs_1.default.readFileSync(apiClientPath, 'utf-8');
@@ -91,9 +95,7 @@ function patchFrontendConfig(lanIP) {
         }
     }
 }
-function patchPwaConfig(lanIP) {
-    const pwaEnvPath = path_1.default.join(PWA_DIR, '.env');
-    fs_1.default.writeFileSync(pwaEnvPath, `VITE_API_BASE_URL=http://${lanIP}:3030/api/v1\n`, 'utf-8');
+function patchPwaConfig(_lanIP) {
     const viteConfigPath = path_1.default.join(PWA_DIR, 'vite.config.ts');
     if (fs_1.default.existsSync(viteConfigPath)) {
         let content = fs_1.default.readFileSync(viteConfigPath, 'utf-8');
@@ -156,19 +158,32 @@ export function spaFallback(subPath: string) {
         fs_1.default.writeFileSync(appTsPath, appContent, 'utf-8');
     }
 }
-async function deploy(sender, startFromStep = 0) {
+// Each target only runs the steps it actually needs.
+// Step 0 (pre-flight) always runs but only applies patches relevant to the target.
+// admin/terminal skip step 6 because they only update static files served by Express.
+const STEPS_FOR_TARGET = {
+    all: [0, 1, 2, 3, 4, 5, 6],
+    backend: [0, 1, 6],
+    admin: [0, 2, 4],
+    terminal: [0, 3, 5],
+};
+async function deploy(sender, options = {}) {
     cancelled = false;
     activeChildren = [];
     const lanIP = (0, lan_detector_1.getLanIP)();
+    const target = options.target ?? 'all';
+    const startFromStep = options.startFromStep ?? 0;
+    const activeSteps = new Set(STEPS_FOR_TARGET[target]);
     const steps = [
         'Prepare Environment',
         'Build Backend',
         'Build Admin Panel',
         'Build Terminal PWA',
-        'Prepare Admin Standalone',
+        'Copy Admin to Server',
         'Copy Terminal to Server',
-        'Restart Services',
+        'Restart Server',
     ];
+    const shouldRun = (step) => activeSteps.has(step) && startFromStep <= step;
     const sendProgress = (step, status, detail) => {
         sender.send('deploy:progress', { step, name: steps[step], status, detail });
     };
@@ -177,32 +192,39 @@ async function deploy(sender, startFromStep = 0) {
     };
     let currentStep = 0;
     try {
+        sendLog(`Deploy target: ${target}${startFromStep > 0 ? ` (resuming from step ${startFromStep})` : ''}`);
         if (startFromStep > 0) {
-            sendLog(`Continuing deploy from step ${startFromStep}...`);
             for (let i = 0; i < startFromStep; i++) {
-                sendProgress(i, 'done');
+                if (activeSteps.has(i))
+                    sendProgress(i, 'done');
             }
         }
-        // Step 0: Pre-flight
-        if (startFromStep <= 0) {
+        // Step 0: Pre-flight (always for any target, but patches are target-scoped)
+        if (shouldRun(0)) {
             currentStep = 0;
             sendProgress(0, 'running');
             sendLog(`Detected LAN IP: ${lanIP}`);
-            sendLog('Patching frontend config (.env, apiClient.ts)...');
-            patchFrontendConfig(lanIP);
-            sendLog('Patching PWA config (vite.config.ts, .env)...');
-            patchPwaConfig(lanIP);
-            sendLog('Patching backend SPA middleware...');
-            patchBackendSpa();
-            const logsDir = path_1.default.join(BACKEND_DIR, 'logs');
-            if (!fs_1.default.existsSync(logsDir))
-                fs_1.default.mkdirSync(logsDir, { recursive: true });
+            if (target === 'all' || target === 'admin') {
+                sendLog('Patching admin config (.env, apiClient.ts)...');
+                patchFrontendConfig(lanIP);
+            }
+            if (target === 'all' || target === 'terminal') {
+                sendLog('Patching terminal PWA config (vite.config.ts, .env)...');
+                patchPwaConfig(lanIP);
+            }
+            if (target === 'all' || target === 'backend') {
+                sendLog('Patching backend SPA middleware...');
+                patchBackendSpa();
+                const logsDir = path_1.default.join(BACKEND_DIR, 'logs');
+                if (!fs_1.default.existsSync(logsDir))
+                    fs_1.default.mkdirSync(logsDir, { recursive: true });
+            }
             sendProgress(0, 'done');
             if (cancelled)
                 throw new Error('Deploy cancelled');
         }
         // Step 1: Build Backend
-        if (startFromStep <= 1) {
+        if (shouldRun(1)) {
             currentStep = 1;
             sendProgress(1, 'running');
             sendLog('Building backend (TypeScript → JavaScript)...');
@@ -212,7 +234,7 @@ async function deploy(sender, startFromStep = 0) {
                 throw new Error('Deploy cancelled');
         }
         // Step 2: Build Admin Panel
-        if (startFromStep <= 2) {
+        if (shouldRun(2)) {
             currentStep = 2;
             sendProgress(2, 'running');
             sendLog('Building admin panel (Next.js)...');
@@ -222,7 +244,7 @@ async function deploy(sender, startFromStep = 0) {
                 throw new Error('Deploy cancelled');
         }
         // Step 3: Build Terminal PWA
-        if (startFromStep <= 3) {
+        if (shouldRun(3)) {
             currentStep = 3;
             sendProgress(3, 'running');
             sendLog('Building terminal PWA (Vite)...');
@@ -231,40 +253,24 @@ async function deploy(sender, startFromStep = 0) {
             if (cancelled)
                 throw new Error('Deploy cancelled');
         }
-        // Step 4: Prepare Admin Standalone
-        if (startFromStep <= 4) {
+        // Step 4: Copy Admin -> public/admin/
+        if (shouldRun(4)) {
             currentStep = 4;
             sendProgress(4, 'running');
-            const standaloneDest = path_1.default.join(FRONTEND_DIR, '.next', 'standalone');
-            // Copy static assets into standalone dir for Next.js to serve
-            const staticSrc = path_1.default.join(FRONTEND_DIR, '.next', 'static');
-            const staticDest = path_1.default.join(standaloneDest, '.next', 'static');
-            if (fs_1.default.existsSync(staticSrc)) {
-                sendLog('Copying static assets into standalone...');
-                if (fs_1.default.existsSync(staticDest))
-                    fs_1.default.rmSync(staticDest, { recursive: true, force: true });
-                fs_1.default.cpSync(staticSrc, staticDest, { recursive: true });
+            const adminSrc = path_1.default.join(FRONTEND_DIR, 'out');
+            const adminDest = path_1.default.join(BACKEND_DIR, 'public', 'admin');
+            sendLog('Copying admin build to server...');
+            if (fs_1.default.existsSync(adminDest)) {
+                fs_1.default.rmSync(adminDest, { recursive: true, force: true });
             }
-            // Copy public folder into standalone dir
-            const publicSrc = path_1.default.join(FRONTEND_DIR, 'public');
-            const publicDest = path_1.default.join(standaloneDest, 'public');
-            if (fs_1.default.existsSync(publicSrc)) {
-                sendLog('Copying public assets into standalone...');
-                if (fs_1.default.existsSync(publicDest))
-                    fs_1.default.rmSync(publicDest, { recursive: true, force: true });
-                fs_1.default.cpSync(publicSrc, publicDest, { recursive: true });
-            }
-            // Ensure frontend logs dir exists
-            const frontendLogsDir = path_1.default.join(FRONTEND_DIR, 'logs');
-            if (!fs_1.default.existsSync(frontendLogsDir))
-                fs_1.default.mkdirSync(frontendLogsDir, { recursive: true });
-            sendLog('Admin standalone build prepared');
+            fs_1.default.cpSync(adminSrc, adminDest, { recursive: true });
+            sendLog(`Copied admin build to ${adminDest}`);
             sendProgress(4, 'done');
             if (cancelled)
                 throw new Error('Deploy cancelled');
         }
         // Step 5: Copy Terminal -> public/terminal/
-        if (startFromStep <= 5) {
+        if (shouldRun(5)) {
             currentStep = 5;
             sendProgress(5, 'running');
             const pwaSrc = path_1.default.join(PWA_DIR, 'dist');
@@ -279,19 +285,19 @@ async function deploy(sender, startFromStep = 0) {
             if (cancelled)
                 throw new Error('Deploy cancelled');
         }
-        // Step 6: Restart Services
-        if (startFromStep <= 6) {
+        // Step 6: Restart Server (skipped for admin/terminal — they only update static files)
+        if (shouldRun(6)) {
             currentStep = 6;
             sendProgress(6, 'running');
-            sendLog('Restarting all services via PM2...');
+            sendLog('Restarting server via PM2...');
             try {
                 await pm2Manager.restart();
             }
             catch {
-                sendLog('PM2 processes not found, starting fresh...');
+                sendLog('PM2 process not found, starting fresh...');
                 await pm2Manager.start();
             }
-            sendLog('All services restarted successfully!');
+            sendLog('Server restarted successfully!');
             sendProgress(6, 'done');
         }
         sender.send('deploy:complete', { success: true });

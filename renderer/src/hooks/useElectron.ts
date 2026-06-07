@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { PM2Status, LanInfo, DeployProgress } from '../types';
+import type { PM2Status, LanInfo, DeployProgress, DeployTarget } from '../types';
 
 const api = window.electronAPI;
 
@@ -97,11 +97,51 @@ export function useLogs() {
   return { active, lines, toggle, clear, stop, setLines };
 }
 
+export function useDbDump() {
+  const [dumping, setDumping] = useState(false);
+  const [lastResult, setLastResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.onDbDumpLog((line: string) => {
+      setLogs(prev => {
+        const next = [...prev, line];
+        return next.length > 200 ? next.slice(-200) : next;
+      });
+    });
+  }, []);
+
+  const dump = useCallback(async () => {
+    if (dumping) return;
+    setDumping(true);
+    setLogs([]);
+    setLastResult(null);
+    try {
+      const result = await api.dbDump();
+      if (result.success && result.filePath) {
+        const sizeKb = result.bytes ? (result.bytes / 1024).toFixed(1) : '?';
+        setLastResult({ ok: true, message: `Saved ${sizeKb} KB → ${result.filePath}` });
+      } else if (result.error === 'cancelled') {
+        setLastResult(null);
+      } else {
+        setLastResult({ ok: false, message: result.error || 'Dump failed' });
+      }
+    } catch (err: any) {
+      setLastResult({ ok: false, message: err?.message || 'Dump failed' });
+    } finally {
+      setDumping(false);
+    }
+  }, [dumping]);
+
+  return { dumping, dump, lastResult, logs };
+}
+
 export function useDeploy() {
   const [deploying, setDeploying] = useState(false);
   const [steps, setSteps] = useState<Record<number, string>>({});
   const [logs, setLogs] = useState<string[]>([]);
   const [failedStep, setFailedStep] = useState<number | null>(null);
+  const [activeTarget, setActiveTarget] = useState<DeployTarget | null>(null);
   const deployingRef = useRef(false);
 
   useEffect(() => {
@@ -125,20 +165,22 @@ export function useDeploy() {
       if (data.success) {
         setLogs(prev => [...prev, 'Deploy completed successfully!']);
         setFailedStep(null);
+        setActiveTarget(null);
       } else {
         setLogs(prev => [...prev, `Deploy failed: ${data.error || 'Unknown error'}`]);
       }
     });
   }, []);
 
-  const start = useCallback(() => {
+  const start = useCallback((target: DeployTarget = 'all') => {
     if (deployingRef.current) return;
     deployingRef.current = true;
     setDeploying(true);
     setSteps({});
     setLogs([]);
     setFailedStep(null);
-    api.deployStart();
+    setActiveTarget(target);
+    api.deployStart(target);
   }, []);
 
   const continueFromFailed = useCallback(() => {
@@ -152,8 +194,8 @@ export function useDeploy() {
     });
     setLogs([]);
     setFailedStep(null);
-    api.deployContinue(failedStep);
-  }, [failedStep]);
+    api.deployContinue(failedStep, activeTarget ?? 'all');
+  }, [failedStep, activeTarget]);
 
   const cancel = useCallback(() => {
     api.deployCancel();
@@ -161,5 +203,5 @@ export function useDeploy() {
 
   const clearLogs = useCallback(() => setLogs([]), []);
 
-  return { deploying, steps, logs, start, continueFromFailed, failedStep, cancel, clearLogs };
+  return { deploying, steps, logs, start, continueFromFailed, failedStep, cancel, clearLogs, activeTarget };
 }

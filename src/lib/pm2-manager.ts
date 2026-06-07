@@ -1,19 +1,32 @@
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 import { PM2Status, RunPm2Options } from '../types';
+import { getBackendEnv } from './env-manager';
 
-const ECOSYSTEM_PATH = path.join(__dirname, '..', '..', 'ecosystem.config.js');
+const isPackaged = fs.existsSync(path.join(process.resourcesPath || '', 'backend'));
+const ECOSYSTEM_PATH = isPackaged
+  ? path.join(process.resourcesPath!, 'ecosystem.config.js')
+  : path.join(__dirname, '..', '..', 'ecosystem.config.js');
 
+// Resolve pm2 from the app's own node_modules so the user does not need a
+// global install. electron-builder unpacks pm2 outside the asar archive
+// (see `asarUnpack` in package.json) — we check that location first.
 function getPm2Bin(): string {
-  return 'pm2';
+  const candidates = [
+    path.join(process.resourcesPath ?? '', 'app.asar.unpacked', 'node_modules', 'pm2', 'bin', 'pm2'),
+    path.join(__dirname, '..', '..', 'node_modules', 'pm2', 'bin', 'pm2'),
+  ];
+  const found = candidates.find((p) => fs.existsSync(p));
+  return found ?? 'pm2'; // last-resort global
 }
 
 function runPm2(args: string[], options: RunPm2Options = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(getPm2Bin(), args, {
       shell: true,
-      cwd: options.cwd || path.join(__dirname, '..', '..'),
-      env: { ...process.env },
+      cwd: options.cwd || path.dirname(ECOSYSTEM_PATH),
+      env: { ...process.env, ...getBackendEnv() },
     });
 
     let stdout = '';
@@ -46,12 +59,12 @@ export async function start(): Promise<void> {
 }
 
 export async function stop(): Promise<void> {
-  await runPm2(['stop', 'all']);
+  await runPm2(['stop', 'vfc-backend']);
 }
 
 export async function restart(): Promise<void> {
   try {
-    await runPm2(['restart', 'all']);
+    await runPm2(['restart', 'vfc-backend']);
   } catch {
     await start();
   }
@@ -83,7 +96,8 @@ export async function getStatus(): Promise<PM2Status> {
 export function streamLogs(onLine: (line: string) => void): ChildProcess {
   const child = spawn(getPm2Bin(), ['logs', 'vfc-backend', '--raw', '--lines', '50'], {
     shell: true,
-    cwd: path.join(__dirname, '..', '..'),
+    cwd: path.dirname(ECOSYSTEM_PATH),
+    env: { ...process.env, ...getBackendEnv() },
   });
 
   const processData = (data: Buffer): void => {

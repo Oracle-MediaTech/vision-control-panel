@@ -40,9 +40,12 @@ const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const pm2Manager = __importStar(require("./lib/pm2-manager"));
 const deployManager = __importStar(require("./lib/deploy-manager"));
+const dbManager = __importStar(require("./lib/db-manager"));
+const envManager = __importStar(require("./lib/env-manager"));
 const lan_detector_1 = require("./lib/lan-detector");
 let mainWindow = null;
 let logChild = null;
+let shuttingDown = false;
 function createWindow() {
     mainWindow = new electron_1.BrowserWindow({
         width: 950,
@@ -68,8 +71,12 @@ function createWindow() {
         }
     });
 }
-electron_1.app.whenReady().then(createWindow);
-electron_1.app.on('window-all-closed', () => {
+// Stop the backend PM2 process whenever the control panel is shutting down.
+// Idempotent: safe to call from both `before-quit` and `window-all-closed`.
+async function shutdownBackend() {
+    if (shuttingDown)
+        return;
+    shuttingDown = true;
     if (logChild) {
         try {
             logChild.kill();
@@ -77,7 +84,26 @@ electron_1.app.on('window-all-closed', () => {
         catch { }
         logChild = null;
     }
-    electron_1.app.quit();
+    try {
+        await pm2Manager.stop();
+    }
+    catch {
+        // backend may already be stopped, or pm2 not reachable — nothing to do
+    }
+}
+electron_1.app.whenReady().then(() => {
+    envManager.ensureEnvFile();
+    createWindow();
+});
+// Block first quit attempt so we can stop the backend cleanly, then quit for real.
+electron_1.app.on('before-quit', (event) => {
+    if (shuttingDown)
+        return;
+    event.preventDefault();
+    shutdownBackend().finally(() => electron_1.app.quit());
+});
+electron_1.app.on('window-all-closed', () => {
+    shutdownBackend().finally(() => electron_1.app.quit());
 });
 electron_1.app.on('activate', () => {
     if (electron_1.BrowserWindow.getAllWindows().length === 0)
@@ -139,14 +165,14 @@ electron_1.ipcMain.on('pm2:logs-stop', () => {
     }
 });
 // Deploy
-electron_1.ipcMain.on('deploy:start', () => {
+electron_1.ipcMain.on('deploy:start', (_event, target) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-        deployManager.deploy(mainWindow.webContents);
+        deployManager.deploy(mainWindow.webContents, { target });
     }
 });
-electron_1.ipcMain.on('deploy:continue', (_event, fromStep) => {
+electron_1.ipcMain.on('deploy:continue', (_event, fromStep, target) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-        deployManager.deploy(mainWindow.webContents, fromStep);
+        deployManager.deploy(mainWindow.webContents, { target, startFromStep: fromStep });
     }
 });
 electron_1.ipcMain.on('deploy:cancel', () => {
@@ -155,5 +181,47 @@ electron_1.ipcMain.on('deploy:cancel', () => {
 // LAN Info
 electron_1.ipcMain.handle('lan:get-info', () => {
     return (0, lan_detector_1.getURLs)();
+});
+// Settings: env file (DATABASE_URL, JWT_SECRET, etc.) lives in userData
+electron_1.ipcMain.handle('settings:get-env', () => {
+    return {
+        path: envManager.getEnvPath(),
+        content: envManager.readEnvFile(),
+    };
+});
+electron_1.ipcMain.handle('settings:save-env', (_event, content) => {
+    try {
+        envManager.writeEnvFile(content);
+        return { success: true };
+    }
+    catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+// Database dump
+electron_1.ipcMain.handle('db:dump', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        return { success: false, error: 'Window not available' };
+    }
+    const { canceled, filePath } = await electron_1.dialog.showSaveDialog(mainWindow, {
+        title: 'Save database dump',
+        defaultPath: dbManager.defaultDumpFilename(),
+        filters: [{ name: 'SQL', extensions: ['sql'] }],
+    });
+    if (canceled || !filePath) {
+        return { success: false, error: 'cancelled' };
+    }
+    try {
+        const send = (line) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('db:dump-log', line);
+            }
+        };
+        const result = await dbManager.dumpDatabase(filePath, send);
+        return { success: true, filePath, bytes: result.bytes };
+    }
+    catch (err) {
+        return { success: false, error: err.message };
+    }
 });
 //# sourceMappingURL=main.js.map

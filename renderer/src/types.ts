@@ -27,6 +27,8 @@ export interface IpcResult {
   error?: string;
 }
 
+export type DeployTarget = 'all' | 'backend' | 'admin' | 'terminal';
+
 export interface ElectronAPI {
   pm2Start: () => Promise<IpcResult>;
   pm2Stop: () => Promise<IpcResult>;
@@ -35,13 +37,15 @@ export interface ElectronAPI {
   pm2StartLogs: () => void;
   pm2StopLogs: () => void;
   onPm2Log: (callback: (line: string) => void) => void;
-  deployStart: () => void;
-  deployContinue: (fromStep: number) => void;
+  deployStart: (target?: DeployTarget) => void;
+  deployContinue: (fromStep: number, target?: DeployTarget) => void;
   deployCancel: () => void;
   onDeployProgress: (callback: (data: DeployProgress) => void) => void;
   onDeployLog: (callback: (line: string) => void) => void;
   onDeployComplete: (callback: (data: { success: boolean; error?: string }) => void) => void;
   getLanInfo: () => Promise<LanInfo>;
+  dbDump: () => Promise<{ success: boolean; filePath?: string; bytes?: number; error?: string }>;
+  onDbDumpLog: (callback: (line: string) => void) => void;
   removeAllListeners: (channel: string) => void;
 }
 

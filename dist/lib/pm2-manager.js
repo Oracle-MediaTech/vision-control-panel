@@ -11,16 +11,29 @@ exports.streamLogs = streamLogs;
 exports.deletePm2 = deletePm2;
 const child_process_1 = require("child_process");
 const path_1 = __importDefault(require("path"));
-const ECOSYSTEM_PATH = path_1.default.join(__dirname, '..', '..', 'ecosystem.config.js');
+const fs_1 = __importDefault(require("fs"));
+const env_manager_1 = require("./env-manager");
+const isPackaged = fs_1.default.existsSync(path_1.default.join(process.resourcesPath || '', 'backend'));
+const ECOSYSTEM_PATH = isPackaged
+    ? path_1.default.join(process.resourcesPath, 'ecosystem.config.js')
+    : path_1.default.join(__dirname, '..', '..', 'ecosystem.config.js');
+// Resolve pm2 from the app's own node_modules so the user does not need a
+// global install. electron-builder unpacks pm2 outside the asar archive
+// (see `asarUnpack` in package.json) — we check that location first.
 function getPm2Bin() {
-    return 'pm2';
+    const candidates = [
+        path_1.default.join(process.resourcesPath ?? '', 'app.asar.unpacked', 'node_modules', 'pm2', 'bin', 'pm2'),
+        path_1.default.join(__dirname, '..', '..', 'node_modules', 'pm2', 'bin', 'pm2'),
+    ];
+    const found = candidates.find((p) => fs_1.default.existsSync(p));
+    return found ?? 'pm2'; // last-resort global
 }
 function runPm2(args, options = {}) {
     return new Promise((resolve, reject) => {
         const child = (0, child_process_1.spawn)(getPm2Bin(), args, {
             shell: true,
-            cwd: options.cwd || path_1.default.join(__dirname, '..', '..'),
-            env: { ...process.env },
+            cwd: options.cwd || path_1.default.dirname(ECOSYSTEM_PATH),
+            env: { ...process.env, ...(0, env_manager_1.getBackendEnv)() },
         });
         let stdout = '';
         let stderr = '';
@@ -49,11 +62,11 @@ async function start() {
     await runPm2(['start', ECOSYSTEM_PATH]);
 }
 async function stop() {
-    await runPm2(['stop', 'all']);
+    await runPm2(['stop', 'vfc-backend']);
 }
 async function restart() {
     try {
-        await runPm2(['restart', 'all']);
+        await runPm2(['restart', 'vfc-backend']);
     }
     catch {
         await start();
@@ -83,7 +96,8 @@ async function getStatus() {
 function streamLogs(onLine) {
     const child = (0, child_process_1.spawn)(getPm2Bin(), ['logs', 'vfc-backend', '--raw', '--lines', '50'], {
         shell: true,
-        cwd: path_1.default.join(__dirname, '..', '..'),
+        cwd: path_1.default.dirname(ECOSYSTEM_PATH),
+        env: { ...process.env, ...(0, env_manager_1.getBackendEnv)() },
     });
     const processData = (data) => {
         const lines = data.toString().split('\n');

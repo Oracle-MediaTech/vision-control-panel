@@ -8,10 +8,47 @@
     "build:main": "tsc",
     "build:renderer": "vite build",
     "start": "npm run build && electron .",
-    "dev": "npm run build && concurrently -k \"tsc --watch\" \"vite build --watch\" \"electronmon .\""
+    "dev": "npm run build && concurrently -k \"tsc --watch\" \"vite build --watch\" \"electronmon .\"",
+    "prepackage:backend": "node scripts/stage-backend.js",
+    "pack": "npm run build && npm run prepackage:backend && electron-builder --dir",
+    "dist": "npm run build && npm run prepackage:backend && electron-builder"
+  },
+  "build": {
+    "appId": "com.vision.control-panel",
+    "productName": "Vision Control Panel",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "renderer/dist/**/*",
+      "preload.js"
+    ],
+    "asarUnpack": [
+      "node_modules/pm2/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "ecosystem.config.js",
+        "to": "ecosystem.config.js"
+      },
+      {
+        "from": "../vfc-backend/.stage",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "electronmon": {
-    "patterns": ["dist/**/*"],
+    "patterns": [
+      "dist/**/*"
+    ],
     "logLevel": "quiet"
   },
   "keywords": [],
@@ -20,8 +57,9 @@
   "dependencies": {
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "electron": "^35.0.0",
     "lucide-react": "^1.16.0",
+    "pm2": "^5.4.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "tailwind-merge": "^3.6.0"
@@ -29,10 +67,13 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^25.9.1",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.8.1",
     "electronmon": "^2.0.4",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
