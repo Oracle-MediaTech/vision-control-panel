@@ -44,6 +44,11 @@ export interface ElectronAPI {
   onDeployLog: (callback: (line: string) => void) => void;
   onDeployComplete: (callback: (data: { success: boolean; error?: string }) => void) => void;
   getLanInfo: () => Promise<LanInfo>;
+  configurationLoad(): Promise<any>;
+  configurationSave(config: any): Promise<any>;
+  configurationImport(): Promise<any>;
+  configurationExport(content: string): Promise<any>;
+  configurationTestDatabase(dbParts: any): Promise<any>;
   dbDump: () => Promise<{ success: boolean; filePath?: string; bytes?: number; error?: string }>;
   onDbDumpLog: (callback: (line: string) => void) => void;
   removeAllListeners: (channel: string) => void;

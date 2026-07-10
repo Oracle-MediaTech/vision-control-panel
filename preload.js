@@ -39,6 +39,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   settingsGetEnv: () => ipcRenderer.invoke('settings:get-env'),
   settingsSaveEnv: (content) => ipcRenderer.invoke('settings:save-env', content),
 
+  // Configuration API (structured)
+  configurationLoad: () => ipcRenderer.invoke('configuration:load'),
+  configurationSave: (config) => ipcRenderer.invoke('configuration:save', config),
+  configurationImport: () => ipcRenderer.invoke('configuration:import'),
+  configurationExport: (content) => ipcRenderer.invoke('configuration:export', content),
+  configurationTestDatabase: (dbParts) => ipcRenderer.invoke('configuration:test-database', dbParts),
+
   // Database dump
   dbDump: () => ipcRenderer.invoke('db:dump'),
   onDbDumpLog: (callback) => {

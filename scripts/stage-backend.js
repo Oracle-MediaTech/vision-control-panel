@@ -53,6 +53,7 @@ function main() {
   assertExists(path.join(BACKEND, 'dist', 'server.js'), 'compiled backend (dist/server.js)');
   assertExists(path.join(BACKEND, 'prisma', 'schema.prisma'), 'prisma/schema.prisma');
   assertExists(path.join(BACKEND, 'package.json'), 'vfc-backend/package.json');
+  assertExists(path.join(BACKEND, '.env.template'), 'vfc-backend/.env.template');
 
   log(`staging into ${STAGE}`);
   rmrf(STAGE);
@@ -97,6 +98,12 @@ function main() {
   if (fs.existsSync(lockSrc)) {
     fs.copyFileSync(lockSrc, path.join(STAGE, 'package-lock.json'));
   }
+
+  log('copying .env.template');
+  fs.copyFileSync(
+    path.join(BACKEND, '.env.template'),
+    path.join(STAGE, '.env'),
+  );
 
   // Production-only node_modules
   log('installing production dependencies (npm ci --omit=dev)');

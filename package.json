@@ -29,16 +29,29 @@
     ],
     "extraResources": [
       {
+        "from": "node-runtime",
+        "to": "node"
+      },
+      {
         "from": "ecosystem.config.js",
         "to": "ecosystem.config.js"
       },
       {
         "from": "../vfc-backend/.stage",
         "to": "backend"
+      },
+      {
+        "from": "../vfc-backend/node_modules",
+        "to": "backend/node_modules"
+      },
+      {
+        "from": "../vfc-backend/package.json",
+        "to": "backend/package.json"
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
@@ -59,6 +72,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
     "pm2": "^5.4.0",
+    "pg": "^8.11.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

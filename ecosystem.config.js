@@ -19,8 +19,9 @@ module.exports = {
     cwd: BACKEND_DIR,
     watch: false,
     autorestart: true,
-    max_restarts: 10,
-    restart_delay: 3000,
+    max_restarts: 3,
+    min_uptime: "10s",
+    restart_delay: 5000,
     env: {
       NODE_ENV: 'production',
       PORT: 3030,

@@ -42,6 +42,8 @@ const pm2Manager = __importStar(require("./lib/pm2-manager"));
 const deployManager = __importStar(require("./lib/deploy-manager"));
 const dbManager = __importStar(require("./lib/db-manager"));
 const envManager = __importStar(require("./lib/env-manager"));
+const fs_1 = __importDefault(require("fs"));
+const pg_1 = require("pg");
 const lan_detector_1 = require("./lib/lan-detector");
 let mainWindow = null;
 let logChild = null;
@@ -91,8 +93,19 @@ async function shutdownBackend() {
         // backend may already be stopped, or pm2 not reachable — nothing to do
     }
 }
-electron_1.app.whenReady().then(() => {
+electron_1.app.whenReady().then(async () => {
     envManager.ensureEnvFile();
+    // Wipe any stale PM2 daemon left over from a previous session. The daemon
+    // caches the env it was first launched with, and that cache survives reboots
+    // (PM2 auto-resurrects from pm2 save). Killing it here guarantees the next
+    // `start()` spawns a fresh daemon that inherits whatever the current
+    // env-manager merge produces (vfc-backend/.env + userData/.env).
+    try {
+        await pm2Manager.killDaemon();
+    }
+    catch {
+        // No daemon running, or pm2 not reachable yet — both are fine.
+    }
     createWindow();
 });
 // Block first quit attempt so we can stop the backend cleanly, then quit for real.
@@ -189,9 +202,223 @@ electron_1.ipcMain.handle('settings:get-env', () => {
         content: envManager.readEnvFile(),
     };
 });
-electron_1.ipcMain.handle('settings:save-env', (_event, content) => {
+electron_1.ipcMain.handle('settings:save-env', async (_event, content) => {
     try {
         envManager.writeEnvFile(content);
+        // The userData .env just changed. Kill the PM2 daemon so the next start
+        // can't accidentally reuse its in-memory copy of the old DATABASE_URL.
+        try {
+            await pm2Manager.killDaemon();
+        }
+        catch {
+            // ok if daemon wasn't running
+        }
+        return { success: true };
+    }
+    catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+// Configuration - structured
+electron_1.ipcMain.handle('configuration:load', async () => {
+    try {
+        const merged = envManager.getBackendEnv();
+        // Basic sections
+        const general = {
+            applicationName: merged.APP_NAME || '',
+            port: merged.PORT || merged.PORT || '',
+            nodeEnv: merged.NODE_ENV || 'production',
+        };
+        // Database - parse DATABASE_URL if present
+        const db = {
+            host: '',
+            port: '',
+            database: '',
+            username: '',
+            password: '',
+            schema: merged.PG_SCHEMA || merged.PGSCHEMA || '',
+        };
+        if (merged.DATABASE_URL) {
+            try {
+                const u = new URL(merged.DATABASE_URL);
+                db.host = u.hostname;
+                db.port = u.port || '5432';
+                db.database = u.pathname.replace(/^\//, '');
+                db.username = decodeURIComponent(u.username || '');
+                db.password = decodeURIComponent(u.password || '');
+            }
+            catch (e) {
+                // ignore parse errors
+            }
+        }
+        const security = {
+            jwtSecret: merged.JWT_SECRET || '',
+            accessTokenExpiry: merged.ACCESS_TOKEN_EXPIRY || '',
+            refreshTokenExpiry: merged.REFRESH_TOKEN_EXPIRY || '',
+        };
+        const email = {
+            smtpHost: merged.SMTP_HOST || '',
+            smtpPort: merged.SMTP_PORT || '',
+            smtpUsername: merged.SMTP_USERNAME || '',
+            smtpPassword: merged.SMTP_PASSWORD || '',
+            smtpSecure: merged.SMTP_SECURE === 'true' || false,
+        };
+        const known = new Set([
+            'APP_NAME', 'PORT', 'NODE_ENV', 'DATABASE_URL', 'JWT_SECRET',
+            'ACCESS_TOKEN_EXPIRY', 'REFRESH_TOKEN_EXPIRY', 'SMTP_HOST', 'SMTP_PORT',
+            'SMTP_USERNAME', 'SMTP_PASSWORD', 'SMTP_SECURE', 'VCP_LOG_DIR', 'PG_SCHEMA'
+        ]);
+        const advanced = {};
+        for (const [k, v] of Object.entries(merged)) {
+            if (!known.has(k))
+                advanced[k] = v;
+        }
+        // last saved timestamp (userData .env)
+        let lastSaved = null;
+        try {
+            const st = fs_1.default.statSync(envManager.getEnvPath());
+            lastSaved = st.mtime.toISOString();
+        }
+        catch { }
+        return { success: true, data: { general, db, security, email, advanced, lastSaved } };
+    }
+    catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+electron_1.ipcMain.handle('configuration:save', async (_event, config) => {
+    try {
+        // Build env object
+        const obj = {};
+        if (config.general?.applicationName)
+            obj.APP_NAME = String(config.general.applicationName);
+        if (config.general?.port)
+            obj.PORT = String(config.general.port);
+        obj.NODE_ENV = 'production';
+        // Database
+        if (config.db) {
+            const parts = config.db;
+            const user = encodeURIComponent(parts.username || '');
+            const pass = encodeURIComponent(parts.password || '');
+            const host = parts.host || 'localhost';
+            const port = parts.port || '5432';
+            const database = parts.database || '';
+            obj.DATABASE_URL = `postgresql://${user}:${pass}@${host}:${port}/${database}`;
+            if (parts.schema)
+                obj.PG_SCHEMA = String(parts.schema);
+        }
+        // Security
+        if (config.security?.jwtSecret)
+            obj.JWT_SECRET = String(config.security.jwtSecret);
+        if (config.security?.accessTokenExpiry)
+            obj.ACCESS_TOKEN_EXPIRY = String(config.security.accessTokenExpiry);
+        if (config.security?.refreshTokenExpiry)
+            obj.REFRESH_TOKEN_EXPIRY = String(config.security.refreshTokenExpiry);
+        // Email
+        if (config.email) {
+            if (config.email.smtpHost)
+                obj.SMTP_HOST = String(config.email.smtpHost);
+            if (config.email.smtpPort)
+                obj.SMTP_PORT = String(config.email.smtpPort);
+            if (config.email.smtpUsername)
+                obj.SMTP_USERNAME = String(config.email.smtpUsername);
+            if (config.email.smtpPassword)
+                obj.SMTP_PASSWORD = String(config.email.smtpPassword);
+            if (config.email.smtpSecure !== undefined)
+                obj.SMTP_SECURE = config.email.smtpSecure ? 'true' : 'false';
+        }
+        // Advanced
+        if (config.advanced && typeof config.advanced === 'object') {
+            for (const [k, v] of Object.entries(config.advanced)) {
+                obj[k] = String(v);
+            }
+        }
+        const content = envManager.stringifyDotEnv(obj);
+        // Determine backend path if available
+        const packagedBackendDir = process.resourcesPath ? path_1.default.join(process.resourcesPath, 'backend') : null;
+        if (packagedBackendDir && fs_1.default.existsSync(packagedBackendDir)) {
+            const backendEnvPath = path_1.default.join(packagedBackendDir, '.env');
+            fs_1.default.writeFileSync(backendEnvPath, content, 'utf-8');
+        }
+        // Also persist to userData .env for runtime edits
+        envManager.writeEnvFile(content);
+        // Ensure PM2 daemon won't reuse old env cache
+        try {
+            await pm2Manager.killDaemon();
+        }
+        catch { }
+        return { success: true };
+    }
+    catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+electron_1.ipcMain.handle('configuration:import', async () => {
+    if (!mainWindow || mainWindow.isDestroyed())
+        return { success: false, error: 'Window not available' };
+    const { canceled, filePaths } = await electron_1.dialog.showOpenDialog(mainWindow, {
+        title: 'Import .env file',
+        properties: ['openFile'],
+        filters: [{ name: '.env files', extensions: ['env', 'txt'] }, { name: 'All Files', extensions: ['*'] }],
+    });
+    if (canceled || !filePaths || !filePaths[0])
+        return { success: false, error: 'cancelled' };
+    try {
+        const text = fs_1.default.readFileSync(filePaths[0], 'utf-8');
+        const parsed = envManager.parseDotEnvText(text);
+        // Reuse configuration:load logic by merging parsed over backend
+        const merged = { ...envManager.getBackendEnv(), ...parsed };
+        // Build response similar to configuration:load
+        const u = {};
+        if (merged.DATABASE_URL) {
+            try {
+                const url = new URL(merged.DATABASE_URL);
+                u.host = url.hostname;
+                u.port = url.port || '5432';
+                u.database = url.pathname.replace(/^\//, '');
+                u.username = decodeURIComponent(url.username);
+                u.password = decodeURIComponent(url.password);
+            }
+            catch { }
+        }
+        const response = {
+            general: { applicationName: merged.APP_NAME || '', port: merged.PORT || '', nodeEnv: merged.NODE_ENV || 'production' },
+            db: { host: u.host || '', port: u.port || '', database: u.database || '', username: u.username || '', password: u.password || '', schema: merged.PG_SCHEMA || '' },
+            security: { jwtSecret: merged.JWT_SECRET || '', accessTokenExpiry: merged.ACCESS_TOKEN_EXPIRY || '', refreshTokenExpiry: merged.REFRESH_TOKEN_EXPIRY || '' },
+            email: { smtpHost: merged.SMTP_HOST || '', smtpPort: merged.SMTP_PORT || '', smtpUsername: merged.SMTP_USERNAME || '', smtpPassword: merged.SMTP_PASSWORD || '', smtpSecure: merged.SMTP_SECURE === 'true' },
+            advanced: Object.fromEntries(Object.entries(merged).filter(([k]) => !['APP_NAME', 'PORT', 'NODE_ENV', 'DATABASE_URL', 'JWT_SECRET', 'ACCESS_TOKEN_EXPIRY', 'REFRESH_TOKEN_EXPIRY', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USERNAME', 'SMTP_PASSWORD', 'SMTP_SECURE', 'VCP_LOG_DIR', 'PG_SCHEMA'].includes(k)))
+        };
+        return { success: true, data: response };
+    }
+    catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+electron_1.ipcMain.handle('configuration:export', async (_event, content) => {
+    if (!mainWindow || mainWindow.isDestroyed())
+        return { success: false, error: 'Window not available' };
+    const { canceled, filePath } = await electron_1.dialog.showSaveDialog(mainWindow, { title: 'Export .env', defaultPath: 'vfc.env', filters: [{ name: 'env', extensions: ['env', 'txt'] }] });
+    if (canceled || !filePath)
+        return { success: false, error: 'cancelled' };
+    try {
+        fs_1.default.writeFileSync(filePath, content, 'utf-8');
+        return { success: true, filePath };
+    }
+    catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+electron_1.ipcMain.handle('configuration:test-database', async (_event, dbParts) => {
+    try {
+        const user = dbParts.username || '';
+        const password = dbParts.password || '';
+        const host = dbParts.host || 'localhost';
+        const port = Number(dbParts.port || 5432);
+        const database = dbParts.database || '';
+        const client = new pg_1.Client({ user, password, host, port, database });
+        await client.connect();
+        await client.query('SELECT 1');
+        await client.end();
         return { success: true };
     }
     catch (err) {

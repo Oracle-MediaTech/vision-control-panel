@@ -2,16 +2,67 @@ import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 
+import os from "node:os";
+
+export function getAppDataDir() {
+    const dir = path.join(
+        os.homedir(),
+        "Documents",
+        "Vision Control Panel"
+    );
+
+    fs.mkdirSync(dir, { recursive: true });
+
+    return dir;
+}
+
+// Default values written into the userData stub on first launch.
+// Mirrored as STUB_VALUES so the merge in getBackendEnv() can detect
+// "user hasn't edited this yet" and fall through to vfc-backend/.env.
+const STUB_VALUES: Record<string, string> = {
+  DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vfc',
+  JWT_SECRET: 'change-me',
+};
+
 const STUB_ENV = `# Vision Control Panel - backend environment.
 # Edit these values, then click "Start" (or "Restart") in the panel.
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vfc
-JWT_SECRET=change-me
+# Any value left at its default below will be ignored in favour of the same
+# key in vfc-backend/.env (so a single edit in either file works).
+DATABASE_URL=${STUB_VALUES.DATABASE_URL}
+JWT_SECRET=${STUB_VALUES.JWT_SECRET}
 `;
+
+/**
+ * Locate vfc-backend/.env so it can act as a fallback for any key in the
+ * userData .env that's still at its auto-stub default. This makes editing
+ * either file work and removes the silent two-source-of-truth foot-gun.
+ *
+ * Packaged: resources/backend/.env (sibling of resources/ecosystem.config.js).
+ * Dev: oracle_codes/vfc-backend/.env (three levels up from src/lib/).
+ */
+export function getBackendDotEnvPath(): string | null {
+  const packagedBackendDir = process.resourcesPath
+    ? path.join(process.resourcesPath, 'backend')
+    : null;
+  if (packagedBackendDir && fs.existsSync(packagedBackendDir)) {
+    return path.join(packagedBackendDir, '.env');
+  }
+  // Dev: __dirname is something like <repo>/vision-control-panel/dist/lib or
+  // src/lib depending on the build. Resolve up to oracle_codes/ then sideways.
+  const devCandidates = [
+    path.resolve(__dirname, '..', '..', '..', 'vfc-backend', '.env'),
+    path.resolve(__dirname, '..', '..', 'vfc-backend', '.env'),
+  ];
+  return devCandidates.find((p) => fs.existsSync(p)) ?? null;
+}
 
 let cachedUserData: string | null = null;
 
 function userData(): string {
-  if (!cachedUserData) cachedUserData = app.getPath('userData');
+  if (!cachedUserData) {
+    cachedUserData = getAppDataDir();
+  }
+
   return cachedUserData;
 }
 
@@ -20,8 +71,14 @@ export function getEnvPath(): string {
 }
 
 export function getLogsDir(): string {
-  const dir = path.join(userData(), 'logs');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const base = userData();
+
+  const dir = path.join(base, "logs");
+
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
   return dir;
 }
 
@@ -63,12 +120,67 @@ export function parseDotEnv(filePath: string): Record<string, string> {
   return out;
 }
 
-/** Returns the env vars the bundled backend should be started with. */
+/** Parse dotenv-style text into an object (same rules as parseDotEnv). */
+export function parseDotEnvText(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+/** Convert an object into dotenv formatted text. Keys are sorted for determinism. */
+export function stringifyDotEnv(obj: Record<string, string>): string {
+  const lines: string[] = [];
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
+  for (const key of keys) {
+    const value = obj[key];
+    // Quote values that contain spaces or # or leading/trailing spaces
+    const needsQuotes = /\s|#/.test(value) || value.length === 0;
+    const outVal = needsQuotes ? `"${value.replace(/"/g, '\\"')}"` : value;
+    lines.push(`${key}=${outVal}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Returns the env vars the bundled backend should be started with.
+ *
+ * Merge order (lowest to highest precedence):
+ *   1. vfc-backend/.env (or resources/backend/.env when packaged) — used as a
+ *      fallback so editing the sibling file works for `npm run dev` users.
+ *   2. userData/.env — wins for any key the user has actually customized.
+ *      Stub defaults (DATABASE_URL=postgres:postgres@..., JWT_SECRET=change-me)
+ *      are explicitly treated as "not customized" and don't override (1).
+ *   3. VCP_LOG_DIR is always set last; userData can't override it.
+ */
 export function getBackendEnv(): Record<string, string> {
-  return {
-    ...parseDotEnv(getEnvPath()),
-    VCP_LOG_DIR: getLogsDir(),
-  };
+  const backendPath = getBackendDotEnvPath();
+  const fromBackend = backendPath ? parseDotEnv(backendPath) : {};
+  const fromUserData = parseDotEnv(getEnvPath());
+
+  const merged: Record<string, string> = { ...fromBackend };
+  for (const [key, value] of Object.entries(fromUserData)) {
+    // If userData still holds the auto-stub for this key, defer to the backend
+    // file so editing either side works without manual sync.
+    if (STUB_VALUES[key] !== undefined && value === STUB_VALUES[key]) continue;
+    merged[key] = value;
+  }
+
+  merged.VCP_LOG_DIR = getLogsDir();
+  return merged;
 }
 
 /** Read the raw .env text for the renderer's Settings tab. */
