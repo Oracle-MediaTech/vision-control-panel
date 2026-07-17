@@ -45,6 +45,8 @@ const envManager = __importStar(require("./lib/env-manager"));
 const fs_1 = __importDefault(require("fs"));
 const pg_1 = require("pg");
 const lan_detector_1 = require("./lib/lan-detector");
+const config_service_1 = require("./lib/config.service");
+const configuration_manager_1 = require("./lib/configuration-manager");
 let mainWindow = null;
 let logChild = null;
 let shuttingDown = false;
@@ -94,12 +96,8 @@ async function shutdownBackend() {
     }
 }
 electron_1.app.whenReady().then(async () => {
-    envManager.ensureEnvFile();
-    // Wipe any stale PM2 daemon left over from a previous session. The daemon
-    // caches the env it was first launched with, and that cache survives reboots
-    // (PM2 auto-resurrects from pm2 save). Killing it here guarantees the next
-    // `start()` spawns a fresh daemon that inherits whatever the current
-    // env-manager merge produces (vfc-backend/.env + userData/.env).
+    (0, config_service_1.ensureConfiguration)();
+    (0, config_service_1.syncBackendEnv)();
     try {
         await pm2Manager.killDaemon();
     }
@@ -286,6 +284,40 @@ electron_1.ipcMain.handle('configuration:load', async () => {
         return { success: false, error: err.message };
     }
 });
+electron_1.ipcMain.handle("configuration:restore-defaults", async () => {
+    return {
+        success: true,
+        data: {
+            general: {
+                applicationName: "Vision Church",
+                port: "3030",
+                nodeEnv: "production",
+            },
+            db: {
+                host: "localhost",
+                port: "5432",
+                database: "",
+                username: "postgres",
+                password: "",
+                schema: "public",
+            },
+            security: {
+                jwtSecret: "",
+                accessTokenExpiry: "720",
+                refreshTokenExpiry: "720",
+            },
+            email: {
+                smtpHost: "",
+                smtpPort: "587",
+                smtpUsername: "",
+                smtpPassword: "",
+                smtpSecure: false,
+            },
+            advanced: {},
+            lastSaved: null,
+        },
+    };
+});
 electron_1.ipcMain.handle('configuration:save', async (_event, config) => {
     try {
         // Build env object
@@ -382,13 +414,55 @@ electron_1.ipcMain.handle('configuration:import', async () => {
             catch { }
         }
         const response = {
-            general: { applicationName: merged.APP_NAME || '', port: merged.PORT || '', nodeEnv: merged.NODE_ENV || 'production' },
-            db: { host: u.host || '', port: u.port || '', database: u.database || '', username: u.username || '', password: u.password || '', schema: merged.PG_SCHEMA || '' },
-            security: { jwtSecret: merged.JWT_SECRET || '', accessTokenExpiry: merged.ACCESS_TOKEN_EXPIRY || '', refreshTokenExpiry: merged.REFRESH_TOKEN_EXPIRY || '' },
-            email: { smtpHost: merged.SMTP_HOST || '', smtpPort: merged.SMTP_PORT || '', smtpUsername: merged.SMTP_USERNAME || '', smtpPassword: merged.SMTP_PASSWORD || '', smtpSecure: merged.SMTP_SECURE === 'true' },
-            advanced: Object.fromEntries(Object.entries(merged).filter(([k]) => !['APP_NAME', 'PORT', 'NODE_ENV', 'DATABASE_URL', 'JWT_SECRET', 'ACCESS_TOKEN_EXPIRY', 'REFRESH_TOKEN_EXPIRY', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USERNAME', 'SMTP_PASSWORD', 'SMTP_SECURE', 'VCP_LOG_DIR', 'PG_SCHEMA'].includes(k)))
+            general: {
+                applicationName: merged.APP_NAME || "",
+                port: merged.PORT || "",
+                nodeEnv: merged.NODE_ENV || "production",
+            },
+            db: {
+                host: u.host || "",
+                port: u.port || "",
+                database: u.database || "",
+                username: u.username || "",
+                password: u.password || "",
+                schema: merged.PG_SCHEMA || "",
+            },
+            security: {
+                jwtSecret: merged.JWT_SECRET || "",
+                accessTokenExpiry: merged.ACCESS_TOKEN_EXPIRY || "",
+                refreshTokenExpiry: merged.REFRESH_TOKEN_EXPIRY || "",
+            },
+            email: {
+                smtpHost: merged.SMTP_HOST || "",
+                smtpPort: merged.SMTP_PORT || "",
+                smtpUsername: merged.SMTP_USERNAME || "",
+                smtpPassword: merged.SMTP_PASSWORD || "",
+                smtpSecure: merged.SMTP_SECURE === "true",
+            },
+            advanced: Object.fromEntries(Object.entries(merged).filter(([k]) => ![
+                "APP_NAME",
+                "PORT",
+                "NODE_ENV",
+                "DATABASE_URL",
+                "JWT_SECRET",
+                "ACCESS_TOKEN_EXPIRY",
+                "REFRESH_TOKEN_EXPIRY",
+                "SMTP_HOST",
+                "SMTP_PORT",
+                "SMTP_USERNAME",
+                "SMTP_PASSWORD",
+                "SMTP_SECURE",
+                "VCP_LOG_DIR",
+                "PG_SCHEMA",
+            ].includes(k))),
         };
-        return { success: true, data: response };
+        // Persist immediately
+        const cfg = (0, config_service_1.uiConfigToConfig)(response);
+        (0, configuration_manager_1.saveConfigurationToBackendEnv)(cfg);
+        return {
+            success: true,
+            data: response,
+        };
     }
     catch (err) {
         return { success: false, error: err.message };

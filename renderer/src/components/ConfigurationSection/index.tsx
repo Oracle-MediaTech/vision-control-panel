@@ -36,7 +36,7 @@ export default function ConfigurationSection() {
           <ImportExport
             importEnv={cfg.importEnv}
             exportEnv={cfg.exportEnv}
-            restoreDefaults={cfg.load}
+            restoreDefaults={cfg.restoreDefault}
             save={cfg.save}
             cancel={cfg.load}
             dirty={cfg.dirty}

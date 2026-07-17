@@ -10,8 +10,9 @@
     "start": "npm run build && electron .",
     "dev": "npm run build && concurrently -k \"tsc --watch\" \"vite build --watch\" \"electronmon .\"",
     "prepackage:backend": "node scripts/stage-backend.js",
+    "prepare:runtime": "node scripts/prepare-runtime.js",
     "pack": "npm run build && npm run prepackage:backend && electron-builder --dir",
-    "dist": "npm run build && npm run prepackage:backend && electron-builder"
+    "dist": "npm run prepare:runtime && npm run build && npm run prepackage:backend && electron-builder"
   },
   "build": {
     "appId": "com.vision.control-panel",
@@ -24,14 +25,26 @@
       "renderer/dist/**/*",
       "preload.js"
     ],
-    "asarUnpack": [
-      "node_modules/pm2/**/*"
-    ],
     "extraResources": [
       {
-        "from": "node-runtime",
-        "to": "node"
-      },
+    "from": "node-runtime/node.exe",
+    "to": "node/node.exe"
+  },
+  {
+    "from": "node-runtime/package.json",
+    "to": "node/package.json"
+  },
+  {
+    "from": "node-runtime/package-lock.json",
+    "to": "node/package-lock.json"
+  },
+  {
+    "from": "node-runtime/node_modules",
+    "to": "node/node_modules",
+    "filter": [
+      "**/*"
+    ]
+  },
       {
         "from": "ecosystem.config.js",
         "to": "ecosystem.config.js"
@@ -71,8 +84,8 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
-    "pm2": "^5.4.0",
     "pg": "^8.11.0",
+    "pm2": "^5.4.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -89,6 +102,7 @@
     "electron": "^35.0.0",
     "electron-builder": "^26.8.1",
     "electronmon": "^2.0.4",
+    "fs-extra": "^11.3.6",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.12"

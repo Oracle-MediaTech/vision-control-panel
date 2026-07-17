@@ -58,7 +58,7 @@ function patchFrontendConfig(_lanIP: string): void {
     if (content.includes('window.location.href = "/login"')) {
       content = content.replace(
         'window.location.href = "/login"',
-        'window.location.href = "/admin/login"'
+        'window.location.href = "/login"'
       );
       fs.writeFileSync(apiClientPath, content, 'utf-8');
     }
@@ -162,9 +162,9 @@ export interface DeployOptions {
 // Step 0 (pre-flight) always runs but only applies patches relevant to the target.
 // admin/terminal skip step 6 because they only update static files served by Express.
 const STEPS_FOR_TARGET: Record<DeployTarget, number[]> = {
-  all:      [0, 1, 2, 3, 4, 5, 6],
-  backend:  [0, 1, 6],
-  admin:    [0, 2, 4],
+  all: [0, 1, 2, 3, 4, 5, 6],
+  backend: [0, 1, 6],
+  admin: [0, 2, 4],
   terminal: [0, 3, 5],
 };
 
@@ -268,7 +268,7 @@ export async function deploy(sender: WebContents, options: DeployOptions = {}): 
       currentStep = 4;
       sendProgress(4, 'running');
       const adminSrc = path.join(FRONTEND_DIR, 'out');
-      const adminDest = path.join(BACKEND_DIR, 'public', 'admin');
+      const adminDest = path.join(BACKEND_DIR, 'public', 'home');
 
       sendLog('Copying admin build to server...');
       if (fs.existsSync(adminDest)) {

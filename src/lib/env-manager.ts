@@ -3,17 +3,18 @@ import fs from 'fs';
 import path from 'path';
 
 import os from "node:os";
+import { getBackendEnvPath } from './config.service';
 
 export function getAppDataDir() {
-    const dir = path.join(
-        os.homedir(),
-        "Documents",
-        "Vision Control Panel"
-    );
+  const dir = path.join(
+    os.homedir(),
+    "Documents",
+    "Vision Control Panel"
+  );
 
-    fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
 
-    return dir;
+  return dir;
 }
 
 // Default values written into the userData stub on first launch.
@@ -155,19 +156,8 @@ export function stringifyDotEnv(obj: Record<string, string>): string {
   return lines.join('\n') + '\n';
 }
 
-/**
- * Returns the env vars the bundled backend should be started with.
- *
- * Merge order (lowest to highest precedence):
- *   1. vfc-backend/.env (or resources/backend/.env when packaged) — used as a
- *      fallback so editing the sibling file works for `npm run dev` users.
- *   2. userData/.env — wins for any key the user has actually customized.
- *      Stub defaults (DATABASE_URL=postgres:postgres@..., JWT_SECRET=change-me)
- *      are explicitly treated as "not customized" and don't override (1).
- *   3. VCP_LOG_DIR is always set last; userData can't override it.
- */
 export function getBackendEnv(): Record<string, string> {
-  const backendPath = getBackendDotEnvPath();
+  const backendPath = getBackendEnvPath();
   const fromBackend = backendPath ? parseDotEnv(backendPath) : {};
   const fromUserData = parseDotEnv(getEnvPath());
 
@@ -181,6 +171,24 @@ export function getBackendEnv(): Record<string, string> {
 
   merged.VCP_LOG_DIR = getLogsDir();
   return merged;
+}
+
+export function syncBackendEnv(): void {
+  const source = path.join(getAppDataDir(), ".env");
+
+  const destination = path.join(
+    process.resourcesPath,
+    "backend",
+    ".env"
+  );
+
+  if (!fs.existsSync(source)) {
+    throw new Error(`Source .env not found: ${source}`);
+  }
+
+  fs.copyFileSync(source, destination);
+
+  console.log("Backend .env synchronized.");
 }
 
 /** Read the raw .env text for the renderer's Settings tab. */

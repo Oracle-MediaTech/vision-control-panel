@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Configuration API (structured)
   configurationLoad: () => ipcRenderer.invoke('configuration:load'),
+  configurationRestoreDefaults: () => ipcRenderer.invoke("configuration:restore-defaults"),
   configurationSave: (config) => ipcRenderer.invoke('configuration:save', config),
   configurationImport: () => ipcRenderer.invoke('configuration:import'),
   configurationExport: (content) => ipcRenderer.invoke('configuration:export', content),

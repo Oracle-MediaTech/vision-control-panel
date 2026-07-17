@@ -2,9 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { dialog } from 'electron';
-import { parseDotEnv, parseDotEnvText, stringifyDotEnv, getBackendDotEnvPath } from './env-manager';
+import { parseDotEnv, parseDotEnvText, stringifyDotEnv } from './env-manager';
 import { parse as parseUrl } from 'url';
 import { Client } from 'pg';
+import { getBackendEnvPath, getConfigEnvPath, syncBackendEnv } from './config.service';
 
 export type Config = {
   general: { APP_NAME?: string; PORT?: string; NODE_ENV?: string };
@@ -24,7 +25,7 @@ function buildDatabaseUrl(parts: any): string {
 }
 
 export function loadConfiguration(): Config {
-  const backendPath = getBackendDotEnvPath();
+  const backendPath = getBackendEnvPath();
   const backendContent = backendPath && fs.existsSync(backendPath) ? fs.readFileSync(backendPath, 'utf-8') : '';
   const userDataPath = path.join((process as any).env.APPDATA || process.env.HOME || os.homedir(), '.config', 'vision-control-panel');
   // Prefer reading via env-manager where possible; fallback to backend content parse
@@ -100,32 +101,49 @@ export function importEnvFromFile(filePath: string): Config {
   return cfg;
 }
 
-export function saveConfigurationToBackendEnv(cfg: Config) {
-  // Build object
-  const obj: Record<string, string> = {};
-  if (cfg.general.APP_NAME) obj.APP_NAME = cfg.general.APP_NAME;
-  if (cfg.general.PORT) obj.PORT = cfg.general.PORT;
-  obj.NODE_ENV = 'production';
-  if (cfg.database.user) obj.PGUSER = cfg.database.user;
-  if (cfg.database.password) obj.PGPASSWORD = cfg.database.password;
-  if (cfg.database.host) obj.PGHOST = cfg.database.host;
-  if (cfg.database.port) obj.PGPORT = cfg.database.port;
-  if (cfg.database.database) obj.PGDATABASE = cfg.database.database;
-  if (cfg.database.schema) obj.PGSCHEMA = cfg.database.schema;
-  if (cfg.security.JWT_SECRET) obj.JWT_SECRET = cfg.security.JWT_SECRET;
-  if (cfg.security.ACCESS_TOKEN_EXPIRY) obj.ACCESS_TOKEN_EXPIRY = cfg.security.ACCESS_TOKEN_EXPIRY;
-  if (cfg.security.REFRESH_TOKEN_EXPIRY) obj.REFRESH_TOKEN_EXPIRY = cfg.security.REFRESH_TOKEN_EXPIRY;
-  if (cfg.email.SMTP_HOST) obj.SMTP_HOST = cfg.email.SMTP_HOST;
-  if (cfg.email.SMTP_PORT) obj.SMTP_PORT = cfg.email.SMTP_PORT;
-  if (cfg.email.SMTP_USER) obj.SMTP_USER = cfg.email.SMTP_USER;
-  if (cfg.email.SMTP_PASS) obj.SMTP_PASS = cfg.email.SMTP_PASS;
-  if (cfg.email.SMTP_SECURE) obj.SMTP_SECURE = cfg.email.SMTP_SECURE;
-  for (const [k, v] of Object.entries(cfg.advanced)) obj[k] = v;
+export function configToEnv(cfg: Config): string {
 
-  const text = stringifyDotEnv(obj);
-  const backendPath = getBackendDotEnvPath();
-  if (!backendPath) throw new Error('Backend .env path not found');
-  fs.mkdirSync(path.dirname(backendPath), { recursive: true });
-  fs.writeFileSync(backendPath, text, 'utf-8');
-  return { success: true, path: backendPath };
+    const obj: Record<string,string> = {};
+
+    if (cfg.general.APP_NAME) obj.APP_NAME = cfg.general.APP_NAME;
+    if (cfg.general.PORT) obj.PORT = cfg.general.PORT;
+    obj.NODE_ENV = "production";
+
+    if (cfg.database.host) obj.PGHOST = cfg.database.host;
+    if (cfg.database.port) obj.PGPORT = cfg.database.port;
+    if (cfg.database.user) obj.PGUSER = cfg.database.user;
+    if (cfg.database.password) obj.PGPASSWORD = cfg.database.password;
+    if (cfg.database.database) obj.PGDATABASE = cfg.database.database;
+    if (cfg.database.schema) obj.PGSCHEMA = cfg.database.schema;
+
+    if (cfg.security.JWT_SECRET) obj.JWT_SECRET = cfg.security.JWT_SECRET;
+    if (cfg.security.ACCESS_TOKEN_EXPIRY) obj.ACCESS_TOKEN_EXPIRY = cfg.security.ACCESS_TOKEN_EXPIRY;
+    if (cfg.security.REFRESH_TOKEN_EXPIRY) obj.REFRESH_TOKEN_EXPIRY = cfg.security.REFRESH_TOKEN_EXPIRY;
+
+    if (cfg.email.SMTP_HOST) obj.SMTP_HOST = cfg.email.SMTP_HOST;
+    if (cfg.email.SMTP_PORT) obj.SMTP_PORT = cfg.email.SMTP_PORT;
+    if (cfg.email.SMTP_USER) obj.SMTP_USER = cfg.email.SMTP_USER;
+    if (cfg.email.SMTP_PASS) obj.SMTP_PASS = cfg.email.SMTP_PASS;
+
+    if (cfg.email.SMTP_SECURE) obj.SMTP_SECURE = String(cfg.email.SMTP_SECURE);
+
+    Object.assign(obj, cfg.advanced);
+
+    return stringifyDotEnv(obj);
+}
+
+export function saveConfigurationToBackendEnv(cfg: Config) {
+  const text = configToEnv(cfg);
+
+    fs.writeFileSync(
+        getConfigEnvPath(),
+        text,
+        "utf8"
+    );
+
+    syncBackendEnv();
+
+    return {
+        success:true
+    };
 }

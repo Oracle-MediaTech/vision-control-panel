@@ -90,7 +90,7 @@ function patchFrontendConfig(_lanIP) {
     if (fs_1.default.existsSync(apiClientPath)) {
         let content = fs_1.default.readFileSync(apiClientPath, 'utf-8');
         if (content.includes('window.location.href = "/login"')) {
-            content = content.replace('window.location.href = "/login"', 'window.location.href = "/admin/login"');
+            content = content.replace('window.location.href = "/login"', 'window.location.href = "/login"');
             fs_1.default.writeFileSync(apiClientPath, content, 'utf-8');
         }
     }
@@ -258,7 +258,7 @@ async function deploy(sender, options = {}) {
             currentStep = 4;
             sendProgress(4, 'running');
             const adminSrc = path_1.default.join(FRONTEND_DIR, 'out');
-            const adminDest = path_1.default.join(BACKEND_DIR, 'public', 'admin');
+            const adminDest = path_1.default.join(BACKEND_DIR, 'public', 'home');
             sendLog('Copying admin build to server...');
             if (fs_1.default.existsSync(adminDest)) {
                 fs_1.default.rmSync(adminDest, { recursive: true, force: true });

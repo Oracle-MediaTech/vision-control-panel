@@ -18,6 +18,14 @@ export default function useConfiguration() {
     setLoading(false);
   };
 
+  const restoreDefault = async () => {
+    setLoading(true);
+    const res = await window.electronAPI.configurationRestoreDefaults();
+    if (res.success) setConfig(res.data);
+    setDirty(false);
+    setLoading(false);
+  };
+
   useEffect(() => { load(); }, []);
 
   const save = async () => {
@@ -69,5 +77,5 @@ export default function useConfiguration() {
     setDirty(true);
   };
 
-  return { loading, config, dirty, load, save, importEnv, exportEnv, testDatabase, updateField, addVariable, removeVariable };
+  return { loading, config, dirty, load, restoreDefault, save, importEnv, exportEnv, testDatabase, updateField, addVariable, removeVariable };
 }
